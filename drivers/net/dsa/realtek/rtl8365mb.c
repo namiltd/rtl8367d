@@ -415,6 +415,18 @@
 #define  RTL8365MB_VLAN_MC_CONF2_METER_IDX_MSK		GENMASK(10, 5)
 #define  RTL8365MB_VLAN_MC_CONF3_EVID_MSK		GENMASK(12, 0)
 
+#define RTL8367D_REG_EXT_TXC_DLY			0x13f9
+#define RTL8367D_EXT1_RGMII_TX_DLY_MASK			0x38
+
+#define RTL8367D_REG_TOP_CON0				0x1d70
+#define  RTL8367D_MAC7_SEL_EXT1_MASK			0x2000
+#define  RTL8367D_MAC4_SEL_EXT1_MASK			0x1000
+
+#define RTL8367D_REG_SDS1_MISC0				0x1d78
+#define  RTL8367D_SDS1_MODE_MASK			0x1f
+#define  RTL8367D_PORT_SDS_MODE_DISABLE			0x1f
+
+
 enum rtl8365mb_table {
 	RTL8365MB_TABLE_ACL_RULE = 1,
 	RTL8365MB_TABLE_ACL_ACT,
@@ -1516,6 +1528,8 @@ static int rtl8365mb_ext_config_rgmii(struct realtek_priv *priv, int port,
 	int rx_delay = 0;
 	u32 val;
 	int ret;
+	bool family_c = priv->chip_data->chip_info->chip_id == 0x6367;
+	u32 data;
 
 	if (!extint)
 		return -ENODEV;
@@ -1582,6 +1596,22 @@ static int rtl8365mb_ext_config_rgmii(struct realtek_priv *priv, int port,
 				   extint->id));
 	if (ret)
 		return ret;
+
+	if (!family_c && (extint->id == 1)) {
+		regmap_update_bits(
+			priv->map, RTL8367D_REG_EXT_TXC_DLY,
+			RTL8367D_EXT1_RGMII_TX_DLY_MASK, 0);
+		/* Configure RGMII/MII mux to port 7 if UTP_PORT4 is not RGMII mode */
+		regmap_read(priv->map, RTL8367D_REG_TOP_CON0, &data);
+		data &= RTL8367D_MAC4_SEL_EXT1_MASK;
+		if (data == 0)
+			regmap_update_bits(
+				priv->map, RTL8367D_REG_TOP_CON0,
+				RTL8367D_MAC7_SEL_EXT1_MASK, RTL8367D_MAC7_SEL_EXT1_MASK);
+		regmap_update_bits(
+			priv->map, RTL8367D_REG_SDS1_MISC0,
+			RTL8367D_SDS1_MODE_MASK, RTL8367D_PORT_SDS_MODE_DISABLE);
+	}
 
 	return 0;
 }
