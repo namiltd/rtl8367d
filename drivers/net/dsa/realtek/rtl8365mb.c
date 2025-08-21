@@ -233,6 +233,7 @@
 #define RTL8365MB_PORT_SPEED_10M	0
 #define RTL8365MB_PORT_SPEED_100M	1
 #define RTL8365MB_PORT_SPEED_1000M	2
+#define RTL8367D_PORT_SPEED_2500M	5
 
 /* External interface force configuration registers 0~2 */
 #define RTL8365MB_DIGITAL_INTERFACE_FORCE_REG0		0x1310 /* EXT0 */
@@ -250,6 +251,21 @@
 #define   RTL8365MB_DIGITAL_INTERFACE_FORCE_LINK_MASK		0x0010
 #define   RTL8365MB_DIGITAL_INTERFACE_FORCE_DUPLEX_MASK		0x0004
 #define   RTL8365MB_DIGITAL_INTERFACE_FORCE_SPEED_MASK		0x0003
+#define   RTL8367D_DIGITAL_INTERFACE_FORCE_SPEED_MASK		0x3000
+
+#define RTL8367D_DIGITAL_INTERFACE_FORCE_REG0		0x12c0 /* EXT0 */
+#define RTL8367D_DIGITAL_INTERFACE_FORCE_REG1		0x12c1 /* EXT1 */
+#define RTL8367D_DIGITAL_INTERFACE_FORCE_REG(_extint) \
+		((_extint) == 0 ? RTL8367D_DIGITAL_INTERFACE_FORCE_REG0 : \
+		 (_extint) == 1 ? RTL8367D_DIGITAL_INTERFACE_FORCE_REG1 : \
+		 0x0)
+
+#define RTL8367D_DIGITAL_INTERFACE_FORCE_REG0_EN	0x12c8 /* EXT0 */
+#define RTL8367D_DIGITAL_INTERFACE_FORCE_REG1_EN	0x12c9 /* EXT1 */
+#define RTL8367D_DIGITAL_INTERFACE_FORCE_REG_EN(_extint) \
+		((_extint) == 0 ? RTL8367D_DIGITAL_INTERFACE_FORCE_REG0_EN : \
+		 (_extint) == 1 ? RTL8367D_DIGITAL_INTERFACE_FORCE_REG1_EN : \
+		 0x0)
 
 /* CPU port mask register - controls which ports are treated as CPU ports */
 #define RTL8365MB_CPU_PORT_MASK_REG	0x1219
@@ -364,6 +380,11 @@
 #define RTL8365MB_VLAN_PVID_CTRL_OFFSET(port) \
 	(((port) & 1) << 3)
 
+#define RTL8367D_VLAN_PVID_CTRL_BASE			0x0700
+#define RTL8367D_VLAN_PVID_CTRL_REG(port) \
+	(RTL8367D_VLAN_PVID_CTRL_BASE + (port))
+#define RTL8367D_VLAN_PVID_CTRL_MASK			0xFFF
+
 /* VLAN 4k table entry */
 #define RTL8365MB_VLAN_4K_ENTRY_SIZE			3 /* 48-bits */
 #define RTL8365MB_VLAN_4K_CONF0_MEMBERS_LS_MASK		GENMASK(7, 0)
@@ -376,6 +397,8 @@
 #define RTL8365MB_VLAN_4K_CONF1_ENVLANPOL_MASK		GENMASK(8, 8)
 #define RTL8365MB_VLAN_4K_CONF1_METER_IDX_LS_MASK	GENMASK(13, 9)
 #define RTL8365MB_VLAN_4K_CONF2_METER_IDX_MS_MASK	GENMASK(6, 6)
+
+#define RTL8367D_VLAN_4K_CONF1_FID_MSI_MASK		GENMASK(1, 0)
 
 /* VLAN MC registers */
 #define RTL8365MB_VLAN_MC_CONF_BASE			0x0728
@@ -659,6 +682,18 @@ static const struct rtl8365mb_chip_info rtl8365mb_chip_infos[] = {
 			{ 6, 1, PHY_INTF(MII) | PHY_INTF(TMII) |
 				PHY_INTF(RMII) | PHY_INTF(RGMII) },
 			{ 7, 2, PHY_INTF(MII) | PHY_INTF(TMII) |
+				PHY_INTF(RMII) | PHY_INTF(RGMII) },
+		},
+		.jam_table = rtl8365mb_init_jam_8365mb_vc,
+		.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
+	},
+	{
+		.name = "RTL8367S-VB",
+		.chip_id = 0x6642,
+		.chip_ver = 0x0010,
+		.extints = {
+			{ 6, 0, PHY_INTF(SGMII) | PHY_INTF(HSGMII) },
+			{ 7, 1, PHY_INTF(MII) | PHY_INTF(TMII) |
 				PHY_INTF(RMII) | PHY_INTF(RGMII) },
 		},
 		.jam_table = rtl8365mb_init_jam_8365mb_vc,
@@ -1051,7 +1086,7 @@ static void rtl8365mb_buf_vlan4k(u16 *buf, struct rtl8366_vlan_4k *vlan4k)
 		   (FIELD_GET(RTL8365MB_VLAN_4K_CONF2_UNTAG_MS_MASK, buf[2]) <<
 		    FIELD_WIDTH(RTL8365MB_VLAN_4K_CONF0_UNTAG_LS_MASK));
 
-	vlan4k->fid = FIELD_GET(RTL8365MB_VLAN_4K_CONF1_FID_MSI_MASK, buf[1]);
+	vlan4k->fid = FIELD_GET(family_c ? RTL8365MB_VLAN_4K_CONF1_FID_MSI_MASK : RTL8367D_VLAN_4K_CONF1_FID_MSI_MASK, buf[1]);
 	/* vlan4k->vlan_based_pri_enabled = FIELD_GET(RTL8365MB_VLAN_4K_CONF1_VBPEN_MASK, buf[1]); */
 	/* vlan4k->priority = FIELD_GET(RTL8365MB_VLAN_4K_CONF1_VBPRI_MASK, buf[1]); */
 	/* vlan4k->vlan_policy_enabled = FIELD_GET(RTL8365MB_VLAN_4K_CONF1_ENVLANPOL_MASK, buf[1]); */
@@ -1070,9 +1105,16 @@ static void rtl8365mb_vlan4k_buf(struct rtl8366_vlan_4k *vlan4k, u16 *buf)
 	buf[2] |= FIELD_PREP(RTL8365MB_VLAN_4K_CONF2_MEMBERS_MS_MASK,
 				    vlan4k->member >> FIELD_WIDTH(RTL8365MB_VLAN_4K_CONF0_MEMBERS_LS_MASK));
 
-	buf[1] &= ~RTL8365MB_VLAN_4K_CONF1_FID_MSI_MASK;
-	buf[1] |= FIELD_PREP(RTL8365MB_VLAN_4K_CONF1_FID_MSI_MASK,
-				    vlan4k->fid);
+	if (family_c) {
+		buf[1] &= ~RTL8365MB_VLAN_4K_CONF1_FID_MSI_MASK;
+		buf[1] |= FIELD_PREP(RTL8365MB_VLAN_4K_CONF1_FID_MSI_MASK,
+					vlan4k->fid);
+	} else {
+		buf[1] &= ~RTL8367D_VLAN_4K_CONF1_FID_MSI_MASK;
+		buf[1] |= FIELD_PREP(RTL8367D_VLAN_4K_CONF1_FID_MSI_MASK,
+					vlan4k->fid);
+		buf[1] |= 12; /* ivl_svl - BIT(3), svlan_chek_ivl_svl - BIT(2) */
+	}
 
 	/*buf[1] &= ~RTL8365MB_VLAN_4K_CONF1_VBPRI_MASK;
 	buf[1] |= FIELD_PREP(RTL8365MB_VLAN_4K_CONF1_VBPRI_MASK,
@@ -1179,6 +1221,7 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 	int vlanmc_idx;
 	u16 evid;
 	int ret;
+	bool family_c = priv->chip_data->chip_info->chip_id == 0x6367;
 
 	dev_dbg(priv->dev, "%s VLAN %d MC on port %d\n",
 		include?"add":"del",
@@ -1255,7 +1298,7 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 	}
 
 	ret = regmap_read(priv->map,
-			  RTL8365MB_VLAN_PVID_CTRL_REG(port),
+			  family_c ? RTL8365MB_VLAN_PVID_CTRL_REG(port) : RTL8367D_VLAN_PVID_CTRL_REG(port),
 			  &pvid_vlanmc_idx);
 	if (ret) {
 		if (extack)
@@ -1337,10 +1380,17 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 			dev_dbg(priv->dev, "Set port %d PVID to %d (@ %d idx)\n",
 				port, vlan->vid, vlanmc_idx);
 
-			ret = regmap_update_bits(priv->map,
-				 RTL8365MB_VLAN_PVID_CTRL_REG(port),
-				 RTL8365MB_VLAN_PVID_CTRL_MASK(port),
-				 vlanmc_idx << RTL8365MB_VLAN_PVID_CTRL_OFFSET(port));
+			if (family_c) {
+				ret = regmap_update_bits(priv->map,
+					RTL8365MB_VLAN_PVID_CTRL_REG(port),
+					RTL8365MB_VLAN_PVID_CTRL_MASK(port),
+					vlanmc_idx << RTL8365MB_VLAN_PVID_CTRL_OFFSET(port));
+			} else {
+				ret = regmap_update_bits(priv->map,
+					RTL8367D_VLAN_PVID_CTRL_REG(port),
+					RTL8367D_VLAN_PVID_CTRL_MASK,
+					vlanmc_idx);
+			}
 			if (ret) {
 				if (extack)
 					NL_SET_ERR_MSG_MOD(extack,
@@ -1549,6 +1599,7 @@ static int rtl8365mb_ext_config_forcemode(struct realtek_priv *priv, int port,
 	u32 r_link;
 	int val;
 	int ret;
+	bool family_c = priv->chip_data->chip_info->chip_id == 0x6367;
 
 	if (!extint)
 		return -ENODEV;
@@ -1559,7 +1610,9 @@ static int rtl8365mb_ext_config_forcemode(struct realtek_priv *priv, int port,
 		r_rx_pause = rx_pause ? 1 : 0;
 		r_tx_pause = tx_pause ? 1 : 0;
 
-		if (speed == SPEED_1000) {
+		if (!family_c && (speed == SPEED_2500)) {
+			r_speed = RTL8367D_PORT_SPEED_2500M;
+		} else if (speed == SPEED_1000) {
 			r_speed = RTL8365MB_PORT_SPEED_1000M;
 		} else if (speed == SPEED_100) {
 			r_speed = RTL8365MB_PORT_SPEED_100M;
@@ -1589,8 +1642,7 @@ static int rtl8365mb_ext_config_forcemode(struct realtek_priv *priv, int port,
 		r_duplex = 0;
 	}
 
-	val = FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_EN_MASK, 1) |
-	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_TXPAUSE_MASK,
+	val = FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_TXPAUSE_MASK,
 			 r_tx_pause) |
 	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_RXPAUSE_MASK,
 			 r_rx_pause) |
@@ -1598,11 +1650,28 @@ static int rtl8365mb_ext_config_forcemode(struct realtek_priv *priv, int port,
 	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_DUPLEX_MASK,
 			 r_duplex) |
 	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_SPEED_MASK, r_speed);
-	ret = regmap_write(priv->map,
+	if (family_c) (
+		val |= FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_EN_MASK, 1);
+		ret = regmap_write(priv->map,
 			   RTL8365MB_DIGITAL_INTERFACE_FORCE_REG(extint->id),
 			   val);
-	if (ret)
-		return ret;
+		if (ret)
+			return ret;
+	} else {
+		val |= FIELD_PREP(RTL8367D_DIGITAL_INTERFACE_FORCE_LINK_MASK,
+			   r_link/(RTL8365MB_DIGITAL_INTERFACE_FORCE_LINK_MASK + 1))
+		ret = regmap_write(priv->map,
+			   RTL8367D_DIGITAL_INTERFACE_FORCE_REG(extint->id),
+			   val);
+		if (ret)
+			return ret;
+
+		ret = regmap_write(priv->map,
+			   RTL8367D_DIGITAL_INTERFACE_FORCE_REG_EN(extint->id),
+			   0xffff);
+		if (ret)
+			return ret
+	}
 
 	return 0;
 }
