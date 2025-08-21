@@ -236,6 +236,7 @@
 #define RTL8365MB_PORT_SPEED_10M	0
 #define RTL8365MB_PORT_SPEED_100M	1
 #define RTL8365MB_PORT_SPEED_1000M	2
+#define RTL8367D_PORT_SPEED_2500M	5
 
 /* External interface force configuration registers 0~2 */
 #define RTL8365MB_DIGITAL_INTERFACE_FORCE_REG0		0x1310 /* EXT0 */
@@ -253,6 +254,21 @@
 #define   RTL8365MB_DIGITAL_INTERFACE_FORCE_LINK_MASK		0x0010
 #define   RTL8365MB_DIGITAL_INTERFACE_FORCE_DUPLEX_MASK		0x0004
 #define   RTL8365MB_DIGITAL_INTERFACE_FORCE_SPEED_MASK		0x0003
+#define   RTL8367D_DIGITAL_INTERFACE_FORCE_SPEED_MASK		0x3000
+
+#define RTL8367D_DIGITAL_INTERFACE_FORCE_REG0		0x12c0 /* EXT0 */
+#define RTL8367D_DIGITAL_INTERFACE_FORCE_REG1		0x12c1 /* EXT1 */
+#define RTL8367D_DIGITAL_INTERFACE_FORCE_REG(_extint) \
+		((_extint) == 0 ? RTL8367D_DIGITAL_INTERFACE_FORCE_REG0 : \
+		 (_extint) == 1 ? RTL8367D_DIGITAL_INTERFACE_FORCE_REG1 : \
+		 0x0)
+
+#define RTL8367D_DIGITAL_INTERFACE_FORCE_REG0_EN	0x12c8 /* EXT0 */
+#define RTL8367D_DIGITAL_INTERFACE_FORCE_REG1_EN	0x12c9 /* EXT1 */
+#define RTL8367D_DIGITAL_INTERFACE_FORCE_REG_EN(_extint) \
+		((_extint) == 0 ? RTL8367D_DIGITAL_INTERFACE_FORCE_REG0_EN : \
+		 (_extint) == 1 ? RTL8367D_DIGITAL_INTERFACE_FORCE_REG1_EN : \
+		 0x0)
 
 /* CPU port mask register - controls which ports are treated as CPU ports */
 #define RTL8365MB_CPU_PORT_MASK_REG	0x1219
@@ -1577,6 +1593,8 @@ static int rtl8365mb_ext_config_forcemode(struct realtek_priv *priv, int port,
 	u32 r_link;
 	int val;
 	int ret;
+	struct rtl8365mb *mb = priv->chip_data;
+	bool family_c = mb->chip_info->chip_id == 0x6367;
 
 	if (!extint)
 		return -ENODEV;
@@ -1587,7 +1605,9 @@ static int rtl8365mb_ext_config_forcemode(struct realtek_priv *priv, int port,
 		r_rx_pause = rx_pause ? 1 : 0;
 		r_tx_pause = tx_pause ? 1 : 0;
 
-		if (speed == SPEED_1000) {
+		if (!family_c && (speed == SPEED_2500)) {
+			r_speed = RTL8367D_PORT_SPEED_2500M;
+		} else if (speed == SPEED_1000) {
 			r_speed = RTL8365MB_PORT_SPEED_1000M;
 		} else if (speed == SPEED_100) {
 			r_speed = RTL8365MB_PORT_SPEED_100M;
@@ -1617,8 +1637,7 @@ static int rtl8365mb_ext_config_forcemode(struct realtek_priv *priv, int port,
 		r_duplex = 0;
 	}
 
-	val = FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_EN_MASK, 1) |
-	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_TXPAUSE_MASK,
+	val = FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_TXPAUSE_MASK,
 			 r_tx_pause) |
 	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_RXPAUSE_MASK,
 			 r_rx_pause) |
@@ -1626,11 +1645,28 @@ static int rtl8365mb_ext_config_forcemode(struct realtek_priv *priv, int port,
 	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_DUPLEX_MASK,
 			 r_duplex) |
 	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_SPEED_MASK, r_speed);
-	ret = regmap_write(priv->map,
+	if (family_c) {
+		val |= FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_EN_MASK, 1);
+		ret = regmap_write(priv->map,
 			   RTL8365MB_DIGITAL_INTERFACE_FORCE_REG(extint->id),
 			   val);
-	if (ret)
-		return ret;
+		if (ret)
+			return ret;
+	} else {
+		val |= FIELD_PREP(RTL8367MB_DIGITAL_INTERFACE_FORCE_LINK_MASK,
+			   r_speed/(RTL8365MB_DIGITAL_INTERFACE_FORCE_LINK_MASK + 1));
+		ret = regmap_write(priv->map,
+			   RTL8367D_DIGITAL_INTERFACE_FORCE_REG(extint->id),
+			   val);
+		if (ret)
+			return ret;
+
+		ret = regmap_write(priv->map,
+			   RTL8367D_DIGITAL_INTERFACE_FORCE_REG_EN(extint->id),
+			   0xffff);
+		if (ret)
+			return ret;
+	}
 
 	return 0;
 }
