@@ -1088,7 +1088,7 @@ static int rtl8365mb_vlan_filtering(struct dsa_switch *ds, int port,
 				 BIT(port), vlan_filtering ? BIT(port) : 0);
 }
 
-static void rtl8365mb_buf_vlan4k(u16 *buf, struct rtl8366_vlan_4k *vlan4k)
+static void rtl8365mb_buf_vlan4k(u16 *buf, struct rtl8366_vlan_4k *vlan4k, bool family_c)
 {
 	/* vlan4k.vid = vlan->vid; */
 	vlan4k->member = FIELD_GET(RTL8365MB_VLAN_4K_CONF0_MEMBERS_LS_MASK, buf[0]) |
@@ -1108,7 +1108,7 @@ static void rtl8365mb_buf_vlan4k(u16 *buf, struct rtl8366_vlan_4k *vlan4k)
 	*/
 }
 
-static void rtl8365mb_vlan4k_buf(struct rtl8366_vlan_4k *vlan4k, u16 *buf)
+static void rtl8365mb_vlan4k_buf(struct rtl8366_vlan_4k *vlan4k, u16 *buf, bool family_c)
 {
 	buf[0] &= ~RTL8365MB_VLAN_4K_CONF0_MEMBERS_LS_MASK;
 	buf[0] |= FIELD_PREP(RTL8365MB_VLAN_4K_CONF0_MEMBERS_LS_MASK,
@@ -1148,6 +1148,7 @@ static int rtl8365mb_vlan4k_set(struct dsa_switch *ds, int port,
 	struct realtek_priv *priv = ds->priv;
 	struct rtl8366_vlan_4k vlan4k = {0};
 	int ret;
+	bool family_c = priv->chip_data->chip_info->chip_id == 0x6367;
 
 	dev_dbg(priv->dev, "%s VLAN %d 4K on port %d\n",
 		include?"add":"del",
@@ -1172,7 +1173,7 @@ static int rtl8365mb_vlan4k_set(struct dsa_switch *ds, int port,
 	}
 
 	/* vlan4k.vid = vlan->vid; */
-	rtl8365mb_buf_vlan4k(vlan_entry, &vlan4k);
+	rtl8365mb_buf_vlan4k(vlan_entry, &vlan4k, family_c);
 
 	if (include)
 		vlan4k.member |= BIT(port);
@@ -1185,7 +1186,7 @@ static int rtl8365mb_vlan4k_set(struct dsa_switch *ds, int port,
 		vlan4k.untag &= ~BIT(port);
 	}
 
-	rtl8365mb_vlan4k_buf(&vlan4k, vlan_entry);
+	rtl8365mb_vlan4k_buf(&vlan4k, vlan_entry, family_c);
 
 	ret = rtl8365mb_table_access(priv, RTL8365MB_TABLE_CVLAN,
 				     RTL8365MB_TABLE_WRITE, vlan->vid,
