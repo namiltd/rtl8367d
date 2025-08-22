@@ -1304,7 +1304,7 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 				return ret;
 			}
 
-			rtl8365mb_buf_vlan4k(vlan_entry, &vlan4k);
+			rtl8365mb_buf_vlan4k(vlan_entry, &vlan4k, family_c);
 		}
 
 		vlanmc_idx = first_unused;
