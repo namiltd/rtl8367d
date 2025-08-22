@@ -401,6 +401,8 @@
 #define RTL8365MB_VLAN_4K_CONF1_METER_IDX_LS_MASK	GENMASK(13, 9)
 #define RTL8365MB_VLAN_4K_CONF2_METER_IDX_MS_MASK	GENMASK(6, 6)
 
+#define RTL8367D_VLAN_4K_CONF1_FID_MSI_MASK		GENMASK(1, 0)
+
 /* VLAN MC registers */
 #define RTL8365MB_VLAN_MC_CONF_BASE			0x0728
 #define RTL8365MB_VLAN_MC_CONF_ENTRY_SIZE 		4 /* 64-bit */
@@ -1077,7 +1079,7 @@ static int rtl8365mb_vlan_filtering(struct dsa_switch *ds, int port,
 				 BIT(port), vlan_filtering ? BIT(port) : 0);
 }
 
-static void rtl8365mb_buf_vlan4k(u16 *buf, struct rtl8366_vlan_4k *vlan4k)
+static void rtl8365mb_buf_vlan4k(u16 *buf, struct rtl8366_vlan_4k *vlan4k, bool family_c)
 {
 	/* vlan4k.vid = vlan->vid; */
 	vlan4k->member = FIELD_GET(RTL8365MB_VLAN_4K_CONF0_MEMBERS_LS_MASK, buf[0]) |
@@ -1087,7 +1089,8 @@ static void rtl8365mb_buf_vlan4k(u16 *buf, struct rtl8366_vlan_4k *vlan4k)
 		   (FIELD_GET(RTL8365MB_VLAN_4K_CONF2_UNTAG_MS_MASK, buf[2]) <<
 		    FIELD_WIDTH(RTL8365MB_VLAN_4K_CONF0_UNTAG_LS_MASK));
 
-	vlan4k->fid = FIELD_GET(RTL8365MB_VLAN_4K_CONF1_FID_MSI_MASK, buf[1]);
+	vlan4k->fid = family_c ? FIELD_GET(RTL8365MB_VLAN_4K_CONF1_FID_MSI_MASK, buf[1])
+				: FIELD_GET(RTL8367D_VLAN_4K_CONF1_FID_MSI_MASK, buf[1]);
 	/* vlan4k->vlan_based_pri_enabled = FIELD_GET(RTL8365MB_VLAN_4K_CONF1_VBPEN_MASK, buf[1]); */
 	/* vlan4k->priority = FIELD_GET(RTL8365MB_VLAN_4K_CONF1_VBPRI_MASK, buf[1]); */
 	/* vlan4k->vlan_policy_enabled = FIELD_GET(RTL8365MB_VLAN_4K_CONF1_ENVLANPOL_MASK, buf[1]); */
@@ -1097,7 +1100,7 @@ static void rtl8365mb_buf_vlan4k(u16 *buf, struct rtl8366_vlan_4k *vlan4k)
 	*/
 }
 
-static void rtl8365mb_vlan4k_buf(struct rtl8366_vlan_4k *vlan4k, u16 *buf)
+static void rtl8365mb_vlan4k_buf(struct rtl8366_vlan_4k *vlan4k, u16 *buf, bool family_c)
 {
 	buf[0] &= ~RTL8365MB_VLAN_4K_CONF0_MEMBERS_LS_MASK;
 	buf[0] |= FIELD_PREP(RTL8365MB_VLAN_4K_CONF0_MEMBERS_LS_MASK,
@@ -1106,9 +1109,16 @@ static void rtl8365mb_vlan4k_buf(struct rtl8366_vlan_4k *vlan4k, u16 *buf)
 	buf[2] |= FIELD_PREP(RTL8365MB_VLAN_4K_CONF2_MEMBERS_MS_MASK,
 				    vlan4k->member >> FIELD_WIDTH(RTL8365MB_VLAN_4K_CONF0_MEMBERS_LS_MASK));
 
-	buf[1] &= ~RTL8365MB_VLAN_4K_CONF1_FID_MSI_MASK;
-	buf[1] |= FIELD_PREP(RTL8365MB_VLAN_4K_CONF1_FID_MSI_MASK,
-				    vlan4k->fid);
+	if (family_c) {
+		buf[1] &= ~RTL8365MB_VLAN_4K_CONF1_FID_MSI_MASK;
+		buf[1] |= FIELD_PREP(RTL8365MB_VLAN_4K_CONF1_FID_MSI_MASK,
+					vlan4k->fid);
+	} else {
+		buf[1] &= ~RTL8367D_VLAN_4K_CONF1_FID_MSI_MASK;
+		buf[1] |= FIELD_PREP(RTL8367D_VLAN_4K_CONF1_FID_MSI_MASK,
+					vlan4k->fid);
+		buf[1] |= 12; /* ivl_svl - BIT(3), svlan_chek_ivl_svl - BIT(2) */
+	}
 
 	/*buf[1] &= ~RTL8365MB_VLAN_4K_CONF1_VBPRI_MASK;
 	buf[1] |= FIELD_PREP(RTL8365MB_VLAN_4K_CONF1_VBPRI_MASK,
@@ -1130,6 +1140,8 @@ static int rtl8365mb_vlan4k_set(struct dsa_switch *ds, int port,
 	struct realtek_priv *priv = ds->priv;
 	struct rtl8366_vlan_4k vlan4k = {0};
 	int ret;
+	struct rtl8365mb *mb = priv->chip_data;
+	bool family_c = mb->chip_info->chip_id == 0x6367;
 
 	dev_dbg(priv->dev, "%s VLAN %u 4K on port %d\n",
 		include?"add":"del",
@@ -1154,7 +1166,7 @@ static int rtl8365mb_vlan4k_set(struct dsa_switch *ds, int port,
 	}
 
 	/* vlan4k.vid = vlan->vid; */
-	rtl8365mb_buf_vlan4k(vlan_entry, &vlan4k);
+	rtl8365mb_buf_vlan4k(vlan_entry, &vlan4k, family_c);
 
 	if (include)
 		vlan4k.member |= BIT(port);
@@ -1167,7 +1179,7 @@ static int rtl8365mb_vlan4k_set(struct dsa_switch *ds, int port,
 		vlan4k.untag &= ~BIT(port);
 	}
 
-	rtl8365mb_vlan4k_buf(&vlan4k, vlan_entry);
+	rtl8365mb_vlan4k_buf(&vlan4k, vlan_entry, family_c);
 
 	ret = rtl8365mb_table_access(priv, RTL8365MB_TABLE_CVLAN,
 				     RTL8365MB_TABLE_WRITE, vlan->vid,
@@ -1289,7 +1301,7 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 				return ret;
 			}
 
-			rtl8365mb_buf_vlan4k(vlan_entry, &vlan4k);
+			rtl8365mb_buf_vlan4k(vlan_entry, &vlan4k, family_c);
 		}
 
 		vlanmc_idx = first_unused;
