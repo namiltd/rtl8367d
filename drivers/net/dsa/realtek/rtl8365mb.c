@@ -101,6 +101,9 @@
 #include <linux/if_vlan.h>
 
 #include "realtek.h"
+#include "realtek-smi.h"
+#include "realtek-mdio.h"
+#include "rtl83xx.h"
 
 /* Family-specific data and limits */
 #define RTL8365MB_PHYADDRMAX		7
@@ -206,10 +209,10 @@
 #define RTL8365MB_EXT_PORT_MODE_100FX		13
 
 /* External interface mode configuration registers 0~1 */
-#define RTL8365MB_DIGITAL_INTERFACE_SELECT_REG0		0x1305 /* EXT1 */
+#define RTL8365MB_DIGITAL_INTERFACE_SELECT_REG0		0x1305 /* EXT0,EXT1 */
 #define RTL8365MB_DIGITAL_INTERFACE_SELECT_REG1		0x13C3 /* EXT2 */
 #define RTL8365MB_DIGITAL_INTERFACE_SELECT_REG(_extint) \
-		((_extint) == 1 ? RTL8365MB_DIGITAL_INTERFACE_SELECT_REG0 : \
+		((_extint) <= 1 ? RTL8365MB_DIGITAL_INTERFACE_SELECT_REG0 : \
 		 (_extint) == 2 ? RTL8365MB_DIGITAL_INTERFACE_SELECT_REG1 : \
 		 0x0)
 #define   RTL8365MB_DIGITAL_INTERFACE_SELECT_MODE_MASK(_extint) \
@@ -311,7 +314,7 @@
  */
 #define RTL8365MB_STATS_INTERVAL_JIFFIES	(3 * HZ)
 
-/* Table access registesr */
+/* Table access registers */
 #define RTL8365MB_TABLE_CONTROL_REG		0x0500
 #define   RTL8365MB_TABLE_CONTROL_TABLE_MASK	GENMASK(2, 0)
 #define   RTL8365MB_TABLE_CONTROL_COMMAND_MASK	GENMASK(3, 3)
@@ -334,7 +337,7 @@
 #define RTL8365MB_VLAN_CTRL_REG			0x07A8
 #define   RTL8365MB_VLAN_CTRL_EN_VLAN_MASK	GENMASK(0, 0)
 
-/* VLAN filtering registesr */
+/* VLAN filtering registers */
 #define RTL8365MB_VLAN_INGRESS_REG    0x07A9
 #define RTL8365MB_VLAN_INGRESS_MASK   GENMASK(10, 0)
 
@@ -801,7 +804,7 @@ static int rtl8365mb_phy_ocp_read(struct realtek_priv *priv, int phy,
 	u32 val;
 	int ret;
 
-	mutex_lock(&priv->map_lock);
+	rtl83xx_lock(priv);
 
 	ret = rtl8365mb_phy_poll_busy(priv);
 	if (ret)
@@ -834,7 +837,7 @@ static int rtl8365mb_phy_ocp_read(struct realtek_priv *priv, int phy,
 	*data = val & 0xFFFF;
 
 out:
-	mutex_unlock(&priv->map_lock);
+	rtl83xx_unlock(priv);
 
 	return ret;
 }
@@ -845,7 +848,7 @@ static int rtl8365mb_phy_ocp_write(struct realtek_priv *priv, int phy,
 	u32 val;
 	int ret;
 
-	mutex_lock(&priv->map_lock);
+	rtl83xx_lock(priv);
 
 	ret = rtl8365mb_phy_poll_busy(priv);
 	if (ret)
@@ -876,7 +879,7 @@ static int rtl8365mb_phy_ocp_write(struct realtek_priv *priv, int phy,
 		goto out;
 
 out:
-	mutex_unlock(&priv->map_lock);
+	rtl83xx_unlock(priv);
 
 	return 0;
 }
@@ -967,7 +970,7 @@ static int rtl8365mb_table_access(struct realtek_priv *priv,
 		/* 10th register uses only 4 less significant bits (TODO: not tested) */
 		if (val_size == 10)
 			ret = regmap_update_bits(priv->map,
-					RTL8365MB_TABLE_WRITE_DATA_REG_BASE,
+					RTL8365MB_TABLE_WRITE_DATA_REG_BASE + 9,
 					RTL8365MB_TABLE_10TH_DATA_REG_MASK,
 					FIELD_PREP(RTL8365MB_TABLE_10TH_DATA_REG_MASK, val[9]));
 		if (ret)
@@ -1095,7 +1098,7 @@ static int rtl8365mb_vlan4k_set(struct dsa_switch *ds, int port,
 	struct rtl8366_vlan_4k vlan4k = {0};
 	int ret;
 
-	dev_dbg(priv->dev, "%s VLAN %d 4K on port %d\n",
+	dev_dbg(priv->dev, "%s VLAN %u 4K on port %d\n",
 		include?"add":"del",
 		vlan->vid, port);
 
@@ -1174,13 +1177,14 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 	struct realtek_priv *priv = ds->priv;
 	struct rtl8366_vlan_4k vlan4k = {0};
 	struct rtl8366_vlan_mc vlanmc = {0};
-	u32 pvid_vlanmc_idx, data;
+	u32 data;
+	bool accepted_frame_changed = false;
 	int first_unused = -1;
-	int vlanmc_idx;
+	int pvid_vlanmc_idx, vlanmc_idx;
 	u16 evid;
 	int ret;
 
-	dev_dbg(priv->dev, "%s VLAN %d MC on port %d\n",
+	dev_dbg(priv->dev, "%s VLAN %u MC on port %d\n",
 		include?"add":"del",
 		vlan->vid, port);
 
@@ -1197,7 +1201,7 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 	for (vlanmc_idx = 1; vlanmc_idx < RTL8365MB_VLAN_MC_CONF_SIZE; vlanmc_idx++) {
 		ret = regmap_bulk_read(priv->map,
 				       RTL8365MB_VLAN_MC_CONF_REG(vlanmc_idx),
-				       &vlan_entry,
+				       vlan_entry,
 				       RTL8365MB_VLAN_MC_CONF_ENTRY_SIZE);
 		if (ret) {
 			if (extack)
@@ -1256,13 +1260,16 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 
 	ret = regmap_read(priv->map,
 			  RTL8365MB_VLAN_PVID_CTRL_REG(port),
-			  &pvid_vlanmc_idx);
+			  &data);
 	if (ret) {
 		if (extack)
 			NL_SET_ERR_MSG_MOD(extack,
 					   "Failed to read port PVID");
 		return ret;
 	}
+
+	pvid_vlanmc_idx = (data & RTL8365MB_VLAN_PVID_CTRL_MASK(port))
+			  >> RTL8365MB_VLAN_PVID_CTRL_OFFSET(port);
 
 	ret = regmap_read(priv->map,
 		RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_REG(port),
@@ -1274,8 +1281,8 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 		return ret;
 	}
 
-	accepted_frame = (data & RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_MASK(port)) >>
-			  RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_OFFSET(port);
+	accepted_frame = (data & RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_MASK(port))
+			  >> RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_OFFSET(port);
 
 	dev_dbg(priv->dev, "Current port PVID VLANMC index %d, acpt frame %d\n",
 		pvid_vlanmc_idx, accepted_frame);
@@ -1310,7 +1317,7 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 
 	ret = regmap_bulk_write(priv->map,
 		       RTL8365MB_VLAN_MC_CONF_REG(vlanmc_idx),
-		       &vlan_entry,
+		       vlan_entry,
 		       RTL8365MB_VLAN_MC_CONF_ENTRY_SIZE);
 
 	if (ret) {
@@ -1324,13 +1331,15 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 	 * frames are ignored or when removing a vlan used as PVID */
 	if (!include) {
 		if ((accepted_frame == RTL8365MB_FRAME_TYPE_ANY_FRAME) &&
-				(pvid_vlanmc_idx == vlanmc_idx))
+				(pvid_vlanmc_idx == vlanmc_idx)) {
 			accepted_frame = RTL8365MB_FRAME_TYPE_TAGGED_ONLY;
-
+			accepted_frame_changed = true;
+		}
 	} else if (vlan->flags & BRIDGE_VLAN_INFO_PVID) {
-		if (accepted_frame == RTL8365MB_FRAME_TYPE_TAGGED_ONLY)
+		if (accepted_frame == RTL8365MB_FRAME_TYPE_TAGGED_ONLY) {
 			accepted_frame = RTL8365MB_FRAME_TYPE_ANY_FRAME;
-
+			accepted_frame_changed = true;
+		}
 		/* Only update PVID if it is setting a different VLAN. PVID is not
 		 * enough to let a frame in without being a member of vlan PVID */
 		if (vlanmc_idx != pvid_vlanmc_idx) {
@@ -1350,22 +1359,24 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 			}
 		}
 	}
-	dev_dbg(priv->dev, "Set port %d acpt frame to %d\n",
-		port, accepted_frame);
+	if (accepted_frame_changed) {
+		dev_dbg(priv->dev, "Set port %d acpt frame to %d\n",
+			port, accepted_frame);
 
-	/* Even if ACCEPT_FRAME_TYPE_ANY, the switch will still check if the port
-	 * is a member of vlan PVID
-	 */
-	ret = regmap_update_bits(priv->map,
-		RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_REG(port),
-		RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_MASK(port),
-		accepted_frame << RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_OFFSET(port));
-	if (ret) {
-		if (extack)
-			NL_SET_ERR_MSG_MOD(extack,
-				  "Vlan member and PVID were updated but "
-				  "setting port accepted frame types failed");
-		return ret;
+		/* Even if ACCEPT_FRAME_TYPE_ANY, the switch will still check if the port
+		 * is a member of vlan PVID
+		 */
+		ret = regmap_update_bits(priv->map,
+			RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_REG(port),
+			RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_MASK(port),
+			accepted_frame << RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_OFFSET(port));
+		if (ret) {
+			if (extack)
+				NL_SET_ERR_MSG_MOD(extack,
+					  "Vlan member and PVID were updated but "
+					  "setting port accepted frame types failed");
+			return ret;
+		}
 	}
 
 	return ret;
@@ -1396,7 +1407,7 @@ static int rtl8365mb_vlan_add(struct dsa_switch *ds, int port,
 		return ret;
 	}
 
-	// TODO: fid?
+	/* TODO: fid? */
 	//ret_t rtl8367c_getAsicPortBasedFid(rtk_uint32 port, rtk_uint32* pFid)
 
 	return 0;
@@ -1637,11 +1648,13 @@ static void rtl8365mb_phylink_get_caps(struct dsa_switch *ds, int port,
 		phy_interface_set_rgmii(config->supported_interfaces);
 }
 
-static void rtl8365mb_phylink_mac_config(struct dsa_switch *ds, int port,
+static void rtl8365mb_phylink_mac_config(struct phylink_config *config,
 					 unsigned int mode,
 					 const struct phylink_link_state *state)
 {
-	struct realtek_priv *priv = ds->priv;
+	struct dsa_port *dp = dsa_phylink_to_port(config);
+	struct realtek_priv *priv = dp->ds->priv;
+	u8 port = dp->index;
 	int ret;
 
 	if (mode != MLO_AN_PHY && mode != MLO_AN_FIXED) {
@@ -1665,13 +1678,15 @@ static void rtl8365mb_phylink_mac_config(struct dsa_switch *ds, int port,
 	 */
 }
 
-static void rtl8365mb_phylink_mac_link_down(struct dsa_switch *ds, int port,
+static void rtl8365mb_phylink_mac_link_down(struct phylink_config *config,
 					    unsigned int mode,
 					    phy_interface_t interface)
 {
-	struct realtek_priv *priv = ds->priv;
+	struct dsa_port *dp = dsa_phylink_to_port(config);
+	struct realtek_priv *priv = dp->ds->priv;
 	struct rtl8365mb_port *p;
 	struct rtl8365mb *mb;
+	u8 port = dp->index;
 	int ret;
 
 	mb = priv->chip_data;
@@ -1690,16 +1705,18 @@ static void rtl8365mb_phylink_mac_link_down(struct dsa_switch *ds, int port,
 	}
 }
 
-static void rtl8365mb_phylink_mac_link_up(struct dsa_switch *ds, int port,
+static void rtl8365mb_phylink_mac_link_up(struct phylink_config *config,
+					  struct phy_device *phydev,
 					  unsigned int mode,
 					  phy_interface_t interface,
-					  struct phy_device *phydev, int speed,
-					  int duplex, bool tx_pause,
+					  int speed, int duplex, bool tx_pause,
 					  bool rx_pause)
 {
-	struct realtek_priv *priv = ds->priv;
+	struct dsa_port *dp = dsa_phylink_to_port(config);
+	struct realtek_priv *priv = dp->ds->priv;
 	struct rtl8365mb_port *p;
 	struct rtl8365mb *mb;
+	u8 port = dp->index;
 	int ret;
 
 	mb = priv->chip_data;
@@ -1726,7 +1743,7 @@ static int rtl8365mb_port_change_mtu(struct dsa_switch *ds, int port,
 	int frame_size;
 
 	/* When a new MTU is set, DSA always sets the CPU port's MTU to the
-	 * largest MTU of the slave ports. Because the switch only has a global
+	 * largest MTU of the user ports. Because the switch only has a global
 	 * RX length register, only allowing CPU port here is enough.
 	 */
 	if (!dsa_is_cpu_port(ds, port))
@@ -1779,9 +1796,9 @@ rtl8365mb_port_bridge_join(struct dsa_switch *ds, int port,
 	}
 
 	/* Set the bits for the ports we can access */
-	return regmap_update_bits(priv->map,
+	return port_bitmap ? regmap_update_bits(priv->map,
 				  RTL8365MB_PORT_ISOLATION_REG(port),
-				  port_bitmap, port_bitmap);
+				  port_bitmap, port_bitmap) : 0;
 }
 
 static void
@@ -1979,8 +1996,7 @@ static void rtl8365mb_get_strings(struct dsa_switch *ds, int port, u32 stringset
 
 	for (i = 0; i < RTL8365MB_MIB_END; i++) {
 		struct rtl8365mb_mib_counter *mib = &rtl8365mb_mib_counters[i];
-
-		strncpy(data + i * ETH_GSTRING_LEN, mib->name, ETH_GSTRING_LEN);
+		ethtool_puts(&data, mib->name);
 	}
 }
 
@@ -2418,7 +2434,7 @@ static int rtl8365mb_irq_setup(struct realtek_priv *priv)
 	}
 
 	/* Configure chip interrupt signal polarity */
-	irq_trig = irqd_get_trigger_type(irq_get_irq_data(irq));
+	irq_trig = irq_get_trigger_type(irq);
 	switch (irq_trig) {
 	case IRQF_TRIGGER_RISING:
 	case IRQF_TRIGGER_HIGH:
@@ -2664,7 +2680,7 @@ static int rtl8365mb_vlan_init(struct dsa_switch *ds)
 	rtl8365mb_vlanmc_buf(&vlanmc, vlan_entry);
 	ret = regmap_bulk_write(priv->map,
 		       RTL8365MB_VLAN_MC_CONF_REG(vlanmc_idx),
-		       &vlan_entry,
+		       vlan_entry,
 		       RTL8365MB_VLAN_MC_CONF_ENTRY_SIZE);
 	if (ret) {
 		dev_err(priv->dev, "Failed to write vlan MC entry (vlan 0)\n");
@@ -2737,10 +2753,12 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 		if (dsa_is_unused_port(ds, i))
 			continue;
 
-		/* Forward only to the CPU */
-		ret = rtl8365mb_port_set_isolation(priv, i, cpu->mask);
-		if (ret)
-			goto out_teardown_irq;
+		if ((cpu->mask & (1 << i)) == 0 ) {
+			/* Forward only to the CPU */
+			ret = rtl8365mb_port_set_isolation(priv, i, cpu->mask);
+			if (ret)
+				goto out_teardown_irq;
+		}
 
 		/* Disable learning */
 		ret = rtl8365mb_port_set_learning(priv, i, false);
@@ -2869,15 +2887,18 @@ static int rtl8365mb_detect(struct realtek_priv *priv)
 	return 0;
 }
 
+static const struct phylink_mac_ops rtl8365mb_phylink_mac_ops = {
+	.mac_config = rtl8365mb_phylink_mac_config,
+	.mac_link_down = rtl8365mb_phylink_mac_link_down,
+	.mac_link_up = rtl8365mb_phylink_mac_link_up,
+};
+
 static const struct dsa_switch_ops rtl8365mb_switch_ops = {
 	.get_tag_protocol = rtl8365mb_get_tag_protocol,
 	.change_tag_protocol = rtl8365mb_change_tag_protocol,
 	.setup = rtl8365mb_setup,
 	.teardown = rtl8365mb_teardown,
 	.phylink_get_caps = rtl8365mb_phylink_get_caps,
-	.phylink_mac_config = rtl8365mb_phylink_mac_config,
-	.phylink_mac_link_down = rtl8365mb_phylink_mac_link_down,
-	.phylink_mac_link_up = rtl8365mb_phylink_mac_link_up,
 	.port_stp_state_set = rtl8365mb_port_stp_state_set,
 	.get_strings = rtl8365mb_get_strings,
 	.get_ethtool_stats = rtl8365mb_get_ethtool_stats,
@@ -2906,13 +2927,65 @@ static const struct realtek_ops rtl8365mb_ops = {
 const struct realtek_variant rtl8365mb_variant = {
 	.ds_ops = &rtl8365mb_switch_ops,
 	.ops = &rtl8365mb_ops,
+	.phylink_mac_ops = &rtl8365mb_phylink_mac_ops,
 	.clk_delay = 10,
 	.cmd_read = 0xb9,
 	.cmd_write = 0xb8,
 	.chip_data_sz = sizeof(struct rtl8365mb),
 };
-EXPORT_SYMBOL_GPL(rtl8365mb_variant);
+
+static const struct of_device_id rtl8365mb_of_match[] = {
+	{ .compatible = "realtek,rtl8365mb", .data = &rtl8365mb_variant, },
+	{ /* sentinel */ },
+};
+MODULE_DEVICE_TABLE(of, rtl8365mb_of_match);
+
+static struct platform_driver rtl8365mb_smi_driver = {
+	.driver = {
+		.name = "rtl8365mb-smi",
+		.of_match_table = rtl8365mb_of_match,
+	},
+	.probe  = realtek_smi_probe,
+	.remove_new = realtek_smi_remove,
+	.shutdown = realtek_smi_shutdown,
+};
+
+static struct mdio_driver rtl8365mb_mdio_driver = {
+	.mdiodrv.driver = {
+		.name = "rtl8365mb-mdio",
+		.of_match_table = rtl8365mb_of_match,
+	},
+	.probe  = realtek_mdio_probe,
+	.remove = realtek_mdio_remove,
+	.shutdown = realtek_mdio_shutdown,
+};
+
+static int rtl8365mb_init(void)
+{
+	int ret;
+
+	ret = realtek_mdio_driver_register(&rtl8365mb_mdio_driver);
+	if (ret)
+		return ret;
+
+	ret = realtek_smi_driver_register(&rtl8365mb_smi_driver);
+	if (ret) {
+		realtek_mdio_driver_unregister(&rtl8365mb_mdio_driver);
+		return ret;
+	}
+
+	return 0;
+}
+module_init(rtl8365mb_init);
+
+static void __exit rtl8365mb_exit(void)
+{
+	realtek_smi_driver_unregister(&rtl8365mb_smi_driver);
+	realtek_mdio_driver_unregister(&rtl8365mb_mdio_driver);
+}
+module_exit(rtl8365mb_exit);
 
 MODULE_AUTHOR("Alvin Šipraga <alsi@bang-olufsen.dk>");
 MODULE_DESCRIPTION("Driver for RTL8365MB-VC ethernet switch");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS(REALTEK_DSA);

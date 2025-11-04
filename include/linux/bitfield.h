@@ -66,7 +66,8 @@
 				 _pfx "mask is not constant");		\
 		BUILD_BUG_ON_MSG((_mask) == 0, _pfx "mask is zero");	\
 		BUILD_BUG_ON_MSG(__builtin_constant_p(_val) ?		\
-				 ~((_mask) >> __bf_shf(_mask)) & (_val) : 0, \
+				 ~((_mask) >> __bf_shf(_mask)) &	\
+					(0 + (_val)) : 0,		\
 				 _pfx "value too large for the field"); \
 		BUILD_BUG_ON_MSG(__bf_cast_unsigned(_mask, _mask) >	\
 				 __bf_cast_unsigned(_reg, ~0ull),	\
@@ -92,7 +93,7 @@
  * FIELD_WIDTH() - returns the number of bits in the field
  * @_mask: shifted mask defining the field's length and position
  *
- * FIELD_WITDH() returns the number of 1-bit specified by @_mask.
+ * FIELD_WIDTH() returns the number of 1-bit specified by @_mask.
  */
 #define FIELD_WIDTH(_mask)						\
 	({								\
