@@ -383,6 +383,11 @@
 #define RTL8365MB_VLAN_PVID_CTRL_OFFSET(port) \
 	(((port) & 1) << 3)
 
+#define RTL8367D_VLAN_PVID_CTRL_BASE			0x0700
+#define RTL8367D_VLAN_PVID_CTRL_REG(port) \
+	(RTL8367D_VLAN_PVID_CTRL_BASE + (port))
+#define RTL8367D_VLAN_PVID_CTRL_MASK			0xFFF
+
 /* VLAN 4k table entry */
 #define RTL8365MB_VLAN_4K_ENTRY_SIZE			3 /* 48-bits */
 #define RTL8365MB_VLAN_4K_CONF0_MEMBERS_LS_MASK		GENMASK(7, 0)
@@ -1212,6 +1217,7 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 	int pvid_vlanmc_idx, vlanmc_idx;
 	u16 evid;
 	int ret;
+	bool family_c = mb->chip_info->chip_id == 0x6367;
 
 	dev_dbg(priv->dev, "%s VLAN %u MC on port %d\n",
 		include?"add":"del",
@@ -1290,7 +1296,7 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 	}
 
 	ret = regmap_read(priv->map,
-			  RTL8365MB_VLAN_PVID_CTRL_REG(port),
+			  family_c ? RTL8365MB_VLAN_PVID_CTRL_REG(port) : RTL8367D_VLAN_PVID_CTRL_REG(port),
 			  &data);
 	if (ret) {
 		if (extack)
@@ -1379,10 +1385,17 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 			dev_dbg(priv->dev, "Set port %d PVID to %d (@ %d idx)\n",
 				port, vlan->vid, vlanmc_idx);
 
-			ret = regmap_update_bits(priv->map,
-				 RTL8365MB_VLAN_PVID_CTRL_REG(port),
-				 RTL8365MB_VLAN_PVID_CTRL_MASK(port),
-				 vlanmc_idx << RTL8365MB_VLAN_PVID_CTRL_OFFSET(port));
+			if (family_c) {
+				ret = regmap_update_bits(priv->map,
+					RTL8365MB_VLAN_PVID_CTRL_REG(port),
+					RTL8365MB_VLAN_PVID_CTRL_MASK(port),
+					vlanmc_idx << RTL8365MB_VLAN_PVID_CTRL_OFFSET(port));
+			} else {
+				ret = regmap_update_bits(priv->map,
+					RTL8367D_VLAN_PVID_CTRL_REG(port),
+					RTL8367D_VLAN_PVID_CTRL_MASK,
+					vlanmc_idx);
+			}
 			if (ret) {
 				if (extack)
 					NL_SET_ERR_MSG_MOD(extack,
