@@ -2753,7 +2753,7 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 		if (dsa_is_unused_port(ds, i))
 			continue;
 
-		if ((cpu->mask & (1 << i)) == 0 ) {
+		if ((cpu->mask & BIT(i)) == 0) {
 			/* Forward only to the CPU */
 			ret = rtl8365mb_port_set_isolation(priv, i, cpu->mask);
 			if (ret)
