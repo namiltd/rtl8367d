@@ -1175,6 +1175,7 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 	u16 vlan_entry[RTL8365MB_VLAN_MC_CONF_ENTRY_SIZE] = {0};
 	enum rtl8365mb_frame_type accepted_frame;
 	struct realtek_priv *priv = ds->priv;
+	struct rtl8365mb *mb = priv->chip_data;
 	struct rtl8366_vlan_4k vlan4k = {0};
 	struct rtl8366_vlan_mc vlanmc = {0};
 	u32 data;
@@ -1196,6 +1197,7 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 		return -EINVAL;
 	}
 
+	mutex_lock(&mb->table_lock);
 	/* look for existing entry or an empty one */
 	/* reserve vlanmc_idx=0 to the non-member (see rtl8365mb_vlan_init)  */
 	for (vlanmc_idx = 1; vlanmc_idx < RTL8365MB_VLAN_MC_CONF_SIZE; vlanmc_idx++) {
@@ -1218,6 +1220,7 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 		if (evid == 0x0 && first_unused < 0)
 			first_unused = vlanmc_idx;
 	}
+	mutex_unlock(&mb->table_lock);
 
 	if (vlanmc_idx == RTL8365MB_VLAN_MC_CONF_SIZE) {
 		/* clear last read vlan_entry */
@@ -1315,10 +1318,12 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 		rtl8365mb_vlanmc_buf(&vlanmc, vlan_entry);
 	}
 
+	mutex_lock(&mb->table_lock);
 	ret = regmap_bulk_write(priv->map,
 		       RTL8365MB_VLAN_MC_CONF_REG(vlanmc_idx),
 		       vlan_entry,
 		       RTL8365MB_VLAN_MC_CONF_ENTRY_SIZE);
+	mutex_unlock(&mb->table_lock);
 
 	if (ret) {
 		if (extack)
