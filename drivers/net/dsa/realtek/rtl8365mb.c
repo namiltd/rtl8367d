@@ -2713,6 +2713,9 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 	mb = priv->chip_data;
 	cpu = &mb->cpu;
 
+	/* Table access mutex */
+	mutex_init(&mb->table_lock);
+
 	ret = rtl8365mb_reset_chip(priv);
 	if (ret) {
 		dev_err(priv->dev, "failed to reset chip: %d\n", ret);
@@ -2800,9 +2803,6 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 
 	/* Start statistics counter polling */
 	rtl8365mb_stats_setup(priv);
-
-	/* Table access mutex */
-	mutex_init(&mb->table_lock);
 
 	return 0;
 
