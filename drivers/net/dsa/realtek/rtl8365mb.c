@@ -980,7 +980,7 @@ static int rtl8365mb_table_access(struct realtek_priv *priv,
 		/* vendor driver checks busy flag only on read */
 		ret = regmap_read_poll_timeout(priv->map,
 				RTL8365MB_TABLE_LUT_REG, lut,
-				!FIELD_PREP(RTL8365MB_TABLE_LUT_BUSY_FLAG_MASK, lut),
+				!FIELD_GET(RTL8365MB_TABLE_LUT_BUSY_FLAG_MASK, lut),
 				10, 100);
 		if (ret)
 			goto out;
@@ -1008,7 +1008,7 @@ static int rtl8365mb_table_access(struct realtek_priv *priv,
 
 		ret = regmap_read_poll_timeout(priv->map,
 				RTL8365MB_TABLE_LUT_REG, lut,
-				!FIELD_PREP(RTL8365MB_TABLE_LUT_BUSY_FLAG_MASK,
+				!FIELD_GET(RTL8365MB_TABLE_LUT_BUSY_FLAG_MASK,
 					    lut),
 				10, 100);
 		if (ret)
