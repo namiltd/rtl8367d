@@ -667,6 +667,18 @@ static const struct rtl8365mb_chip_info rtl8365mb_chip_infos[] = {
 		.jam_table = rtl8365mb_init_jam_8365mb_vc,
 		.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
 	},
+	{
+		.name = "RTL8367S-VB",
+		.chip_id = 0x6642,
+		.chip_ver = 0x0010,
+		.extints = {
+			{ 6, 0, PHY_INTF(SGMII) | PHY_INTF(HSGMII) },
+			{ 7, 1, PHY_INTF(MII) | PHY_INTF(TMII) |
+				PHY_INTF(RMII) | PHY_INTF(RGMII) },
+		},
+		.jam_table = rtl8365mb_init_jam_8365mb_vc,
+		.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
+	},
 };
 
 enum rtl8365mb_stp_state {
@@ -742,6 +754,7 @@ struct rtl8365mb_port {
  * @priv: pointer to parent realtek_priv data
  * @irq: registered IRQ or zero
  * @chip_info: chip-specific info about the attached switch
+ * @family_c: true for RTL8367C-compatible register layout (chip_id 0x6367)
  * @cpu: CPU tagging and CPU port configuration for this chip
  * @mib_lock: prevent concurrent reads of MIB counters
  * @table_lock: prevent concurrent reads of tables
@@ -753,6 +766,7 @@ struct rtl8365mb {
 	struct realtek_priv *priv;
 	int irq;
 	const struct rtl8365mb_chip_info *chip_info;
+	bool family_c;
 	struct rtl8365mb_cpu cpu;
 	struct mutex mib_lock;
 	struct mutex table_lock;
@@ -2869,6 +2883,7 @@ static int rtl8365mb_detect(struct realtek_priv *priv)
 
 		if (ci->chip_id == chip_id && ci->chip_ver == chip_ver) {
 			mb->chip_info = ci;
+			mb->family_c = (ci->chip_id == 0x6367U);
 			break;
 		}
 	}
