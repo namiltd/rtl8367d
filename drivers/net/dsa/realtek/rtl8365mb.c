@@ -1209,6 +1209,7 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 			if (extack)
 				NL_SET_ERR_MSG_MOD(extack,
 						   "Failed to read vlan MC entry");
+			mutex_unlock(&mb->table_lock);
 			return ret;
 		}
 
