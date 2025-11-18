@@ -1230,14 +1230,14 @@ static int rtl8365mb_vlanmc_set(struct dsa_switch *ds, int port,
 		/* for now, vlan_mc is only required for PVID */
 		if (!(vlan->flags & BRIDGE_VLAN_INFO_PVID)) {
 			dev_dbg(priv->dev, "Not creating VlanMC for vlan %d until a port uses PVID (%d does not)\n",
-			vlan->vid, port);
+				vlan->vid, port);
 			return 0;
 		}
 
 		if (first_unused < 0) {
 			if (extack)
 				NL_SET_ERR_MSG_FMT_MOD(extack,
-					   "All VLAN MC entries (%d) are in use.", \
+					   "All VLAN MC entries (%d) are in use.",
 					   RTL8365MB_VLAN_MC_CONF_SIZE);
 			return -EINVAL;
 		}
@@ -1459,11 +1459,8 @@ rtl8365mb_get_tag_protocol(struct dsa_switch *ds, int port,
 			   enum dsa_tag_protocol mp)
 {
 	struct realtek_priv *priv = ds->priv;
-	struct rtl8365mb_cpu *cpu;
-	struct rtl8365mb *mb;
-
-	mb = priv->chip_data;
-	cpu = &mb->cpu;
+	struct rtl8365mb *mb = priv->chip_data;
+	struct rtl8365mb_cpu *cpu = &mb->cpu;
 
 	if (cpu->position == RTL8365MB_CPU_POS_BEFORE_CRC)
 		return DSA_TAG_PROTO_RTL8_4T;
@@ -1691,11 +1688,10 @@ static void rtl8365mb_phylink_mac_link_down(struct phylink_config *config,
 	struct dsa_port *dp = dsa_phylink_to_port(config);
 	struct realtek_priv *priv = dp->ds->priv;
 	struct rtl8365mb_port *p;
-	struct rtl8365mb *mb;
+	struct rtl8365mb *mb = priv->chip_data;
 	u8 port = dp->index;
 	int ret;
 
-	mb = priv->chip_data;
 	p = &mb->ports[port];
 	cancel_delayed_work_sync(&p->mib_work);
 
@@ -1721,11 +1717,10 @@ static void rtl8365mb_phylink_mac_link_up(struct phylink_config *config,
 	struct dsa_port *dp = dsa_phylink_to_port(config);
 	struct realtek_priv *priv = dp->ds->priv;
 	struct rtl8365mb_port *p;
-	struct rtl8365mb *mb;
+	struct rtl8365mb *mb = priv->chip_data;
 	u8 port = dp->index;
 	int ret;
 
-	mb = priv->chip_data;
 	p = &mb->ports[port];
 	schedule_delayed_work(&p->mib_work, 0);
 
@@ -1971,11 +1966,9 @@ static int rtl8365mb_mib_counter_read(struct realtek_priv *priv, int port,
 static void rtl8365mb_get_ethtool_stats(struct dsa_switch *ds, int port, u64 *data)
 {
 	struct realtek_priv *priv = ds->priv;
-	struct rtl8365mb *mb;
+	struct rtl8365mb *mb = priv->chip_data;
 	int ret;
 	int i;
-
-	mb = priv->chip_data;
 
 	mutex_lock(&mb->mib_lock);
 	for (i = 0; i < RTL8365MB_MIB_END; i++) {
@@ -2019,9 +2012,8 @@ static void rtl8365mb_get_phy_stats(struct dsa_switch *ds, int port,
 {
 	struct realtek_priv *priv = ds->priv;
 	struct rtl8365mb_mib_counter *mib;
-	struct rtl8365mb *mb;
+	struct rtl8365mb *mb = priv->chip_data;
 
-	mb = priv->chip_data;
 	mib = &rtl8365mb_mib_counters[RTL8365MB_MIB_dot3StatsSymbolErrors];
 
 	mutex_lock(&mb->mib_lock);
@@ -2054,11 +2046,9 @@ static void rtl8365mb_get_mac_stats(struct dsa_switch *ds, int port,
 
 	};
 	struct realtek_priv *priv = ds->priv;
-	struct rtl8365mb *mb;
+	struct rtl8365mb *mb = priv->chip_data;
 	int ret;
 	int i;
-
-	mb = priv->chip_data;
 
 	mutex_lock(&mb->mib_lock);
 	for (i = 0; i < RTL8365MB_MIB_END; i++) {
@@ -2120,9 +2110,8 @@ static void rtl8365mb_get_ctrl_stats(struct dsa_switch *ds, int port,
 {
 	struct realtek_priv *priv = ds->priv;
 	struct rtl8365mb_mib_counter *mib;
-	struct rtl8365mb *mb;
+	struct rtl8365mb *mb = priv->chip_data;
 
-	mb = priv->chip_data;
 	mib = &rtl8365mb_mib_counters[RTL8365MB_MIB_dot3ControlInUnknownOpcodes];
 
 	mutex_lock(&mb->mib_lock);
@@ -2226,9 +2215,8 @@ static void rtl8365mb_get_stats64(struct dsa_switch *ds, int port,
 {
 	struct realtek_priv *priv = ds->priv;
 	struct rtl8365mb_port *p;
-	struct rtl8365mb *mb;
+	struct rtl8365mb *mb = priv->chip_data;
 
-	mb = priv->chip_data;
 	p = &mb->ports[port];
 
 	spin_lock(&p->stats_lock);
@@ -2565,11 +2553,8 @@ static int rtl8365mb_change_tag_protocol(struct dsa_switch *ds,
 					 enum dsa_tag_protocol proto)
 {
 	struct realtek_priv *priv = ds->priv;
-	struct rtl8365mb_cpu *cpu;
-	struct rtl8365mb *mb;
-
-	mb = priv->chip_data;
-	cpu = &mb->cpu;
+	struct rtl8365mb *mb = priv->chip_data;
+	struct rtl8365mb_cpu *cpu = &mb->cpu;
 
 	switch (proto) {
 	case DSA_TAG_PROTO_RTL8_4:
@@ -2635,7 +2620,7 @@ static int rtl8365mb_reset_chip(struct realtek_priv *priv)
 	msleep(100);
 	return regmap_read_poll_timeout(priv->map, RTL8365MB_CHIP_RESET_REG, val,
 					!(val & RTL8365MB_CHIP_RESET_HW_MASK),
-					20000, 1e6);
+					20000, 1000000UL);
 }
 
 /* VLAN support is always enabled in the switch.
@@ -2703,15 +2688,12 @@ static int rtl8365mb_vlan_init(struct dsa_switch *ds)
 static int rtl8365mb_setup(struct dsa_switch *ds)
 {
 	struct realtek_priv *priv = ds->priv;
-	struct rtl8365mb_cpu *cpu;
 	struct dsa_port *cpu_dp;
-	struct rtl8365mb *mb;
+	struct rtl8365mb *mb = priv->chip_data;
+	struct rtl8365mb_cpu *cpu = &mb->cpu;
 	u32 user_ports;
 	int ret;
 	int i;
-
-	mb = priv->chip_data;
-	cpu = &mb->cpu;
 
 	/* Table access mutex */
 	mutex_init(&mb->table_lock);
