@@ -58,16 +58,21 @@
  * number of similar switch controllers from Realtek, but the only hardware we
  * have is the RTL8365MB-VC. Moreover, there does not seem to be any chip under
  * the name RTL8367C. Although one wishes that the 'C' stood for some kind of
- * common hardware revision, there exist examples of chips with the suffix -VC
- * which are explicitly not supported by the rtl8367c driver and which instead
- * require the rtl8367d vendor driver. With all this uncertainty, the driver has
- * been modestly named rtl8365mb. Future implementors may wish to rename things
- * accordingly.
- *
- * In the same family of chips, some carry up to 8 user ports and up to 2
- * extension ports. Where possible this driver tries to make things generic, but
- * more work must be done to support these configurations. According to
- * documentation from Realtek, the family should include the following chips:
+ * common hardware revision, vendor naming is inconsistent across devices and
+ * drivers. In this driver we therefore preserve the original wording where
+ * possible but add a small clarification: "family C" in the code refers to
+ * devices that use the RTL8367C-style register layout (family_c == true).
+ * Other devices in the family use an alternate register layout (commonly
+ * handled by rtl8367d-style code paths); for those parts some tables (for
+ * example VLAN MC) are emulated in software rather than accessed directly in
+ * hardware. With all this uncertainty the driver has been modestly named
+ * rtl8365mb. Future implementors may wish to rename things accordingly.
+ * 
+ * In the rtl8367c and rtl8367d families of chips, some carry up to 8 user
+ * ports and up to 2 extension ports. Where possible this driver tries to make
+ * things generic, but more work must be done to support these configurations.
+ * According to documentation from Realtek, the family should include the
+ * following chips:
  *
  *  - RTL8363NB
  *  - RTL8363NB-VB
@@ -80,6 +85,7 @@
  *  - RTL8367RB-VB
  *  - RTL8367SB
  *  - RTL8367S
+ *  - RTL8367S-VB
  *  - RTL8370MB
  *  - RTL8310SR
  *
