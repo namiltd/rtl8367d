@@ -297,6 +297,7 @@
 #define RTL8365MB_PORT_SPEED_10M	0
 #define RTL8365MB_PORT_SPEED_100M	1
 #define RTL8365MB_PORT_SPEED_1000M	2
+#define RTL8365MB_D_PORT_SPEED_2500M	5
 
 /* External interface force configuration registers 0~2 */
 #define RTL8365MB_DIGITAL_INTERFACE_FORCE_REG0		0x1310 /* EXT0 */
@@ -314,6 +315,22 @@
 #define   RTL8365MB_DIGITAL_INTERFACE_FORCE_LINK_MASK		0x0010
 #define   RTL8365MB_DIGITAL_INTERFACE_FORCE_DUPLEX_MASK		0x0004
 #define   RTL8365MB_DIGITAL_INTERFACE_FORCE_SPEED_MASK		0x0003
+
+#define   RTL8365MB_D_DIGITAL_INTERFACE_FORCE_SPEED2_MASK	0x3000
+
+#define RTL8365MB_D_DIGITAL_INTERFACE_FORCE_REG0		0x12c0 /* EXT0 */
+#define RTL8365MB_D_DIGITAL_INTERFACE_FORCE_REG1		0x12c1 /* EXT1 */
+#define RTL8365MB_D_DIGITAL_INTERFACE_FORCE_REG(_extint) \
+		((_extint) == 0 ? RTL8365MB_D_DIGITAL_INTERFACE_FORCE_REG0 : \
+		 (_extint) == 1 ? RTL8365MB_D_DIGITAL_INTERFACE_FORCE_REG1 : \
+		 0x0)
+
+#define RTL8365MB_D_DIGITAL_INTERFACE_FORCE_REG0_EN	0x12c8 /* EXT0 */
+#define RTL8365MB_D_DIGITAL_INTERFACE_FORCE_REG1_EN	0x12c9 /* EXT1 */
+#define RTL8365MB_D_DIGITAL_INTERFACE_FORCE_REG_EN(_extint) \
+		((_extint) == 0 ? RTL8365MB_D_DIGITAL_INTERFACE_FORCE_REG0_EN : \
+		 (_extint) == 1 ? RTL8365MB_D_DIGITAL_INTERFACE_FORCE_REG1_EN : \
+		 0x0)
 
 /* CPU port mask register - controls which ports are treated as CPU ports */
 #define RTL8365MB_CPU_PORT_MASK_REG	0x1219
@@ -1344,21 +1361,29 @@ static int rtl8365mb_ext_config_forcemode(struct realtek_priv *priv, int port,
 	u32 r_link;
 	int val;
 	int ret;
+	enum rtl8365mb_family family;
 
 	if (!extint)
 		return -ENODEV;
 
+	family = priv->chip_data->family;
 	if (link) {
 		/* Force the link up with the desired configuration */
 		r_link = 1;
 		r_rx_pause = rx_pause ? 1 : 0;
 		r_tx_pause = tx_pause ? 1 : 0;
 
-		/* The speed field has no value for 2.5 Gbps: the rate is
-		 * determined by the HSGMII SerDes configuration, and the
-		 * vendor driver programs the 1 Gbps value here.
-		 */
-		if (speed == SPEED_2500 || speed == SPEED_1000) {
+		if (speed == SPEED_2500) {
+			if (family == RTL8365MB_FAMILY_C)
+				/* The speed field has no value for 2.5 Gbps: the rate is
+				 * determined by the HSGMII SerDes configuration, and the
+				 * vendor driver programs the 1 Gbps value here.
+				 */
+				r_speed = RTL8365MB_PORT_SPEED_1000M;
+			else {
+				r_speed = RTL8365MB_D_PORT_SPEED_2500M;
+			}
+		} else if (speed == SPEED_1000) {
 			r_speed = RTL8365MB_PORT_SPEED_1000M;
 		} else if (speed == SPEED_100) {
 			r_speed = RTL8365MB_PORT_SPEED_100M;
@@ -1391,35 +1416,36 @@ static int rtl8365mb_ext_config_forcemode(struct realtek_priv *priv, int port,
 	if (rtl8365mb_interface_is_serdes(interface)) {
 		u32 sds_val = 0;
 
-		/* For SGMII/HSGMII, also force the link state in the SerDes
-		 * miscellaneous register. This is separate from the external
-		 * interface force register used for RGMII.
-		 */
-		if (link) {
-			sds_val = FIELD_PREP(RTL8365MB_SDS_MISC_SGMII_SPD_MASK,
-					     r_speed) |
-				  FIELD_PREP(RTL8365MB_SDS_MISC_SGMII_LINK_MASK,
-					     r_link) |
-				  FIELD_PREP(RTL8365MB_SDS_MISC_SGMII_FDUP_MASK,
-					     r_duplex) |
-				  FIELD_PREP(RTL8365MB_SDS_MISC_SGMII_TXFC_MASK,
-					     r_tx_pause) |
-				  FIELD_PREP(RTL8365MB_SDS_MISC_SGMII_RXFC_MASK,
-					     r_rx_pause);
+		if (family == RTL8365MB_FAMILY_C) {
+			/* For SGMII/HSGMII, also force the link state in the SerDes
+			 * miscellaneous register. This is separate from the external
+			 * interface force register used for RGMII.
+			 */
+			if (link) {
+				sds_val = FIELD_PREP(RTL8365MB_SDS_MISC_SGMII_SPD_MASK,
+						     r_speed) |
+					  FIELD_PREP(RTL8365MB_SDS_MISC_SGMII_LINK_MASK,
+						     r_link) |
+					  FIELD_PREP(RTL8365MB_SDS_MISC_SGMII_FDUP_MASK,
+						     r_duplex) |
+					  FIELD_PREP(RTL8365MB_SDS_MISC_SGMII_TXFC_MASK,
+						     r_tx_pause) |
+					  FIELD_PREP(RTL8365MB_SDS_MISC_SGMII_RXFC_MASK,
+						     r_rx_pause);
+			}
+			ret = regmap_update_bits(priv->map, RTL8365MB_SDS_MISC_REG,
+						 RTL8365MB_SDS_MISC_SGMII_SPD_MASK |
+						 RTL8365MB_SDS_MISC_SGMII_LINK_MASK |
+						 RTL8365MB_SDS_MISC_SGMII_FDUP_MASK |
+						 RTL8365MB_SDS_MISC_SGMII_TXFC_MASK |
+						 RTL8365MB_SDS_MISC_SGMII_RXFC_MASK,
+						 sds_val);
+			if (ret)
+				return ret;
 		}
-		ret = regmap_update_bits(priv->map, RTL8365MB_SDS_MISC_REG,
-					 RTL8365MB_SDS_MISC_SGMII_SPD_MASK |
-					 RTL8365MB_SDS_MISC_SGMII_LINK_MASK |
-					 RTL8365MB_SDS_MISC_SGMII_FDUP_MASK |
-					 RTL8365MB_SDS_MISC_SGMII_TXFC_MASK |
-					 RTL8365MB_SDS_MISC_SGMII_RXFC_MASK,
-					 sds_val);
-		if (ret)
-			return ret;
 	}
 
-	val = FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_EN_MASK, 1) |
-	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_TXPAUSE_MASK,
+	val = FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_TXPAUSE_MASK,
 			 r_tx_pause) |
 	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_RXPAUSE_MASK,
 			 r_rx_pause) |
@@ -1427,12 +1453,30 @@ static int rtl8365mb_ext_config_forcemode(struct realtek_priv *priv, int port,
 	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_DUPLEX_MASK,
 			 r_duplex) |
 	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_SPEED_MASK, r_speed);
-	ret = regmap_write(priv->map,
+	
+	if (family == RTL8365MB_FAMILY_C) {
+		val |= FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_EN_MASK, 1);
+		ret = regmap_write(priv->map,
 			   RTL8365MB_DIGITAL_INTERFACE_FORCE_REG(extint->id),
 			   val);
-	if (ret)
-		return ret;
+			if (ret)
+			return ret;
+	} else {
+		/* 2500M = 5 = 0b101; 5/(3 + 1) = 1 -> bit 12 set in SPEED2 */
+		val |= FIELD_PREP(RTL8365MB_D_DIGITAL_INTERFACE_FORCE_SPEED2_MASK,
+			   r_speed/(RTL8365MB_DIGITAL_INTERFACE_FORCE_SPEED_MASK + 1));
+		ret = regmap_write(priv->map,
+			   RTL8365MB_D_DIGITAL_INTERFACE_FORCE_REG(extint->id),
+			   val);
+		if (ret)
+			return ret;
 
+		ret = regmap_write(priv->map,
+			   RTL8365MB_D_DIGITAL_INTERFACE_FORCE_REG_EN(extint->id),
+			   0xffff);
+		if (ret)
+			return ret;
+	}
 	return 0;
 }
 
