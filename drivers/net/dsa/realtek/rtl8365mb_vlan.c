@@ -97,6 +97,8 @@
 #define RTL8365MB_METERMAX	63
 #define RTL8365MB_VLAN_MCMAX	31
 
+#define RTL8365MB_D_FID_MAX	3
+
 /* RTL8367S supports 4k vlans (vid<=4095) and 32 enhanced vlans
  * for VIDs up to 8191
  */
@@ -215,7 +217,11 @@ static int rtl8365mb_vlan_4k_read(struct realtek_priv *priv, u16 vid,
 	val = FIELD_GET(RTL8365MB_CVLAN_ENTRY_D2_UNTAG_EXT_MASK, data[2]);
 	vlan4k->untag |= FIELD_PREP(RTL8365MB_CVLAN_UNTAG_HI_MASK, val);
 
-	vlan4k->fid = FIELD_GET(RTL8365MB_CVLAN_ENTRY_D1_FID_MASK, data[1]);
+	val = FIELD_GET(RTL8365MB_CVLAN_ENTRY_D1_FID_MASK, data[1]);
+	/* FID handling differs between families */
+	if (rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D)
+		val &= RTL8365MB_D_FID_MAX;
+	vlan4k->fid = val;
 	vlan4k->priority_en =
 		FIELD_GET(RTL8365MB_CVLAN_ENTRY_D1_VBPEN_MASK, data[1]);
 	vlan4k->priority =
@@ -250,7 +256,14 @@ static int rtl8365mb_vlan_4k_write(struct realtek_priv *priv,
 	val = FIELD_GET(RTL8365MB_CVLAN_UNTAG_LO_MASK, vlan4k->untag);
 	data[0] |= FIELD_PREP(RTL8365MB_CVLAN_ENTRY_D0_UNTAG_MASK, val);
 
-	data[1] |= FIELD_PREP(RTL8365MB_CVLAN_ENTRY_D1_FID_MASK, vlan4k->fid);
+	/* FID handling differs between families */
+	if (rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D) {
+		/* ivl_svl - BIT(3), svlan_check_ivl_svl - BIT(2) */
+		val = (vlan4k->fid & RTL8365MB_D_FID_MAX) | BIT(3) | BIT(2);
+	} else {
+		val = vlan4k->fid;
+	}
+	data[1] |= FIELD_PREP(RTL8365MB_CVLAN_ENTRY_D1_FID_MASK, val);
 	data[1] |= FIELD_PREP(RTL8365MB_CVLAN_ENTRY_D1_VBPEN_MASK,
 			      vlan4k->priority_en);
 	data[1] |= FIELD_PREP(RTL8365MB_CVLAN_ENTRY_D1_VBPRI_MASK,
@@ -263,8 +276,10 @@ static int rtl8365mb_vlan_4k_write(struct realtek_priv *priv,
 	val = FIELD_GET(RTL8365MB_CVLAN_METERIDX_LO_MASK, val);
 	data[1] |= FIELD_PREP(RTL8365MB_CVLAN_ENTRY_D1_METERIDX_MASK, val);
 
-	data[1] |= FIELD_PREP(RTL8365MB_CVLAN_ENTRY_D1_IVL_SVL_MASK,
-			      vlan4k->ivl_en);
+	if (rtl8365mb_get_family(priv) != RTL8365MB_FAMILY_D) {
+		data[1] |= FIELD_PREP(RTL8365MB_CVLAN_ENTRY_D1_IVL_SVL_MASK,
+				      vlan4k->ivl_en);
+	}
 
 	val = FIELD_GET(RTL8365MB_CVLAN_MBR_HI_MASK, vlan4k->member);
 	data[2] |= FIELD_PREP(RTL8365MB_CVLAN_ENTRY_D2_MBR_EXT_MASK, val);
