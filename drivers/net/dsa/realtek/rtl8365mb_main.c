@@ -437,6 +437,26 @@
 #define RTL8365MB_LUT_PORT_LEARN_LIMIT_REG(_physport) \
 		(RTL8365MB_LUT_PORT_LEARN_LIMIT_BASE + (_physport))
 
+/* Family D port-based FID registers (used to isolate an offloaded
+ * VLAN-unaware bridge in FID 1 from standalone ports in FID 0)
+ */
+#define RTL8365MB_D_PORT_PBFIDEN_REG		0x07AC
+#define RTL8365MB_D_PORT_PBFID_BASE		0x07AD
+#define RTL8365MB_D_PORT_PBFID_REG(_physport) \
+		(RTL8365MB_D_PORT_PBFID_BASE + (_physport))
+#define   RTL8365MB_D_PORT_PBFID_MASK		GENMASK(1, 0)
+
+/* Family D LUT configuration */
+#define RTL8365MB_D_LUT_CFG_REG			0x0A30
+#define   RTL8365MB_D_LUT_CFG_BCAM_DISABLE_MASK	BIT(6)
+#define   RTL8365MB_D_LUT_CFG_IPMC_HASH_MASK	BIT(4)
+/* RTL8367D_REG_LUT_CFG2 in the vendor API: the LUT aging timer, in units
+ * of 0.1 s (dal_rtl8367d_l2_aging_set() writes seconds * 10). On family C
+ * this address is the per-port EFID register!
+ */
+#define RTL8365MB_D_LUT_CFG2_REG		0x0A32
+#define   RTL8365MB_D_LUT_AGING_DEFAULT		3000
+
 /* Port isolation (forwarding mask) registers */
 #define RTL8365MB_PORT_ISOLATION_REG_BASE		0x08A2
 #define RTL8365MB_PORT_ISOLATION_REG(_physport) \
@@ -2469,8 +2489,36 @@ static int rtl8365mb_port_vlan_filtering(struct dsa_switch *ds, int port,
 			goto undo_egress_mode;
 	}
 
+	if (rtl8365mb_is_d(priv) &&
+	    dsa_port_bridge_dev_get(dsa_to_port(ds, port))) {
+		u8 fid = vlan_filtering ? 0 : RTL8365MB_D_UNAWARE_BRIDGE_FID;
+
+		ret = regmap_update_bits(priv->map,
+					 RTL8365MB_D_PORT_PBFID_REG(port),
+					 RTL8365MB_D_PORT_PBFID_MASK, fid);
+		if (ret)
+			goto undo_refresh_ivl;
+
+		ret = regmap_update_bits(priv->map,
+					 RTL8365MB_D_PORT_PBFIDEN_REG,
+					 BIT(port),
+					 vlan_filtering ? 0 : BIT(port));
+		if (ret)
+			goto undo_pbfid;
+	}
+
 	return ret;
 
+undo_pbfid:
+	(void)regmap_update_bits(priv->map, RTL8365MB_D_PORT_PBFID_REG(port),
+				 RTL8365MB_D_PORT_PBFID_MASK,
+				 vlan_filtering ? RTL8365MB_D_UNAWARE_BRIDGE_FID : 0);
+undo_refresh_ivl:
+	if (rtl8365mb_is_d(priv)) {
+		mutex_lock(&priv->vlan_lock);
+		(void)rtl8365mb_d_vlan_4k_refresh_ivl(ds, port, !vlan_filtering);
+		mutex_unlock(&priv->vlan_lock);
+	}
 undo_egress_mode:
 	/* The previous state was the opposite of the new one, see below */
 	(void)rtl8365mb_port_set_vlan_egress_mode(priv, port,
@@ -2695,6 +2743,33 @@ static int rtl8365mb_port_pre_bridge_flags(struct dsa_switch *ds, int port,
 static int rtl8365mb_port_set_efid(struct realtek_priv *priv, int port,
 				   u32 efid)
 {
+	/* Family D has no EFID (0x0A32 is RTL8365MB_D_LUT_CFG2_REG). Instead,
+	 * assign port-based FID 1 to offloaded VLAN-unaware bridge ports
+	 * (efid != 0 and !vlan_filtering) so their SVL entries do not collide
+	 * with standalone ports in FID 0.
+	 */
+	if (rtl8365mb_is_d(priv)) {
+		struct dsa_port *dp = dsa_to_port(&priv->ds, port);
+		bool enable = efid && !dsa_port_is_vlan_filtering(dp);
+		u8 fid = enable ? RTL8365MB_D_UNAWARE_BRIDGE_FID : 0;
+		int ret;
+
+		ret = regmap_update_bits(priv->map,
+					 RTL8365MB_D_PORT_PBFID_REG(port),
+					 RTL8365MB_D_PORT_PBFID_MASK, fid);
+		if (ret)
+			return ret;
+
+		ret = regmap_update_bits(priv->map,
+					 RTL8365MB_D_PORT_PBFIDEN_REG,
+					 BIT(port), enable ? BIT(port) : 0);
+		if (ret)
+			(void)regmap_update_bits(priv->map,
+						 RTL8365MB_D_PORT_PBFID_REG(port),
+						 RTL8365MB_D_PORT_PBFID_MASK, 0);
+		return ret;
+	}
+
 	return regmap_update_bits(priv->map, RTL8365MB_PORT_EFID_REG(port),
 				  RTL8365MB_PORT_EFID_MASK(port),
 				  efid << RTL8365MB_PORT_EFID_OFFSET(port));
@@ -3431,6 +3506,28 @@ static int rtl8365mb_change_tag_protocol(struct dsa_switch *ds,
 	return rtl8365mb_cpu_config(priv);
 }
 
+static int rtl8365mb_d_lut_init(struct realtek_priv *priv)
+{
+	int ret;
+
+	/* Ensure port-based FID is disabled on all ports at startup */
+	ret = regmap_write(priv->map, RTL8365MB_D_PORT_PBFIDEN_REG, 0);
+	if (ret)
+		return ret;
+
+	/* After the jam table: lookup multicast by MAC (not DIP) and keep
+	 * the CAM enabled.
+	 */
+	ret = regmap_update_bits(priv->map, RTL8365MB_D_LUT_CFG_REG,
+				 RTL8365MB_D_LUT_CFG_IPMC_HASH_MASK |
+				 RTL8365MB_D_LUT_CFG_BCAM_DISABLE_MASK, 0);
+	if (ret)
+		return ret;
+
+	return regmap_write(priv->map, RTL8365MB_D_LUT_CFG2_REG,
+			    RTL8365MB_D_LUT_AGING_DEFAULT);
+}
+
 static int rtl8365mb_switch_init(struct realtek_priv *priv)
 {
 	struct rtl8365mb *mb = priv->chip_data;
@@ -3518,6 +3615,15 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 		dev_err(priv->dev, "failed to initialize switch: %pe\n",
 			ERR_PTR(ret));
 		goto out_error;
+	}
+
+	if (rtl8365mb_is_d(priv)) {
+		ret = rtl8365mb_d_lut_init(priv);
+		if (ret) {
+			dev_err(priv->dev, "failed to init LUT: %pe\n",
+				ERR_PTR(ret));
+			goto out_error;
+		}
 	}
 
 	if (mb->sds_supported) {
@@ -3672,9 +3778,20 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 		goto out_teardown_irq;
 
 	ds->assisted_learning_on_cpu_port = true;
-	ds->fdb_isolation = true;
-	/* The EFID is 3 bits, but EFID 0 is reserved for standalone ports */
-	ds->max_num_bridges = FIELD_MAX(RTL8365MB_EFID_MASK);
+	if (!rtl8365mb_is_d(priv)) {
+		ds->fdb_isolation = true;
+		/* The EFID is 3 bits, but EFID 0 is reserved for standalone */
+		ds->max_num_bridges = FIELD_MAX(RTL8365MB_EFID_MASK);
+	} else {
+		/* No EFID; FID 0 is used by standalone ports and FID 1 by the
+		 * offloaded VLAN-unaware bridge via port-based FID, so allow
+		 * at most one offloaded bridge. Bridge numbers are allocated
+		 * system-wide by DSA, so this does not stop a bridge that
+		 * already has a number from another switch from being
+		 * offloaded here as well.
+		 */
+		ds->max_num_bridges = 1;
+	}
 
 	ds->configure_vlan_while_not_filtering = true;
 
