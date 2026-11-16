@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 obj-$(CONFIG_NET_DSA_REALTEK)		+= realtek_dsa.o
-realtek_dsa-objs			:= rtl83xx.o
+realtek_dsa-objs			:= rtl83xx.o rtl83xx-qos.o
 
 ifdef CONFIG_NET_DSA_REALTEK_MDIO
 realtek_dsa-objs += realtek-mdio.o
@@ -20,4 +20,5 @@ rtl8365mb-objs := rtl8365mb_main.o \
 		  rtl8365mb_table.o \
 		  rtl8365mb_vlan.o \
 		  rtl8365mb_l2.o \
+		  rtl8365mb_qos.o \
 # end of rtl8365mb-objs
