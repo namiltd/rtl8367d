@@ -35,5 +35,7 @@ int rtl8365mb_c_qos_iprio_to_hw(u8 iprio);
 int rtl8365mb_c_qos_hw_to_iprio(u8 hw);
 int rtl8365mb_c_qos_set_untag_pcp(struct realtek_priv *priv, int port,
 				  u8 hw_prio, u8 untag_pcp);
+int rtl8365mb_d_qos_iprio_to_hw(u8 iprio);
+int rtl8365mb_d_qos_hw_to_iprio(u8 hw);
 
 #endif /* _REALTEK_RTL8365MB_QOS_H */

@@ -62,6 +62,9 @@ struct rtl8365mb_family_info {
 	void (*l2_mc_to_data)(const struct rtl8365mb_l2_mc *mc, u16 *data);
 	int (*qos_iprio_to_hw)(u8 iprio);
 	int (*qos_hw_to_iprio)(u8 hw);
+	/* Optional. A NULL callback means that the family cannot assign a
+	 * configurable PCP to untagged ingress frames.
+	 */
 	int (*qos_set_untag_pcp)(struct realtek_priv *priv, int port,
 				 u8 hw_prio, u8 untag_pcp);
 };
