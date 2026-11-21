@@ -837,6 +837,9 @@ static const struct rtl8365mb_family_info rtl8365mb_family_c = {
 	.l2_uc_to_data = rtl8365mb_c_l2_uc_to_data,
 	.l2_data_to_mc = rtl8365mb_c_l2_data_to_mc,
 	.l2_mc_to_data = rtl8365mb_c_l2_mc_to_data,
+	.qos_iprio_to_hw = rtl8365mb_c_qos_iprio_to_hw,
+	.qos_hw_to_iprio = rtl8365mb_c_qos_hw_to_iprio,
+	.qos_set_untag_pcp = rtl8365mb_c_qos_set_untag_pcp,
 };
 
 /**

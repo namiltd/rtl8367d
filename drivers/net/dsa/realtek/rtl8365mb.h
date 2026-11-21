@@ -16,6 +16,28 @@ struct rtl8365mb_vlan4k;
 struct rtl8365mb_l2_uc;
 struct rtl8365mb_l2_mc;
 
+/**
+ * struct rtl8365mb_family_info - family-specific data and operations
+ * @family: silicon family identifier
+ * @jam_table: family-specific initialization jam table
+ * @jam_size: number of entries in @jam_table
+ * @ext_config_forcemode: program an external interface force-mode register
+ * @vlan_4k_read: read a 4K VLAN table entry
+ * @vlan_4k_write: write a 4K VLAN table entry
+ * @vlan_port_get_pvid: read a port PVID
+ * @vlan_port_reset_pvid: restore a port PVID to its default
+ * @vlan_pvid_port_set: add a port to a PVID
+ * @vlan_pvid_port_clear: remove a port from a PVID
+ * @l2_entry_size: number of words in an L2 table entry
+ * @l2_data_to_uc: unpack a unicast L2 table entry
+ * @l2_uc_to_data: pack a unicast L2 table entry
+ * @l2_data_to_mc: unpack a multicast L2 table entry
+ * @l2_mc_to_data: pack a multicast L2 table entry
+ * @qos_iprio_to_hw: convert a traffic type to a hardware priority
+ * @qos_hw_to_iprio: convert a hardware priority to a traffic type
+ * @qos_set_untag_pcp: program the per-port untagged PCP where supported
+ */
+
 struct rtl8365mb_family_info {
 	enum rtl8365mb_family family;
 	const struct rtl8365mb_jam_tbl_entry *jam_table;
@@ -38,6 +60,10 @@ struct rtl8365mb_family_info {
 	void (*l2_uc_to_data)(const struct rtl8365mb_l2_uc *uc, u16 *data);
 	void (*l2_data_to_mc)(const u16 *data, struct rtl8365mb_l2_mc *mc);
 	void (*l2_mc_to_data)(const struct rtl8365mb_l2_mc *mc, u16 *data);
+	int (*qos_iprio_to_hw)(u8 iprio);
+	int (*qos_hw_to_iprio)(u8 hw);
+	int (*qos_set_untag_pcp)(struct realtek_priv *priv, int port,
+				 u8 hw_prio, u8 untag_pcp);
 };
 
 const struct rtl8365mb_family_info *
