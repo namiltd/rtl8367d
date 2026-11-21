@@ -38,6 +38,10 @@ struct rtl8365mb_family_info {
 	void (*l2_uc_to_data)(const struct rtl8365mb_l2_uc *uc, u16 *data);
 	void (*l2_data_to_mc)(const u16 *data, struct rtl8365mb_l2_mc *mc);
 	void (*l2_mc_to_data)(const struct rtl8365mb_l2_mc *mc, u16 *data);
+	int (*qos_iprio_to_hw)(u8 iprio);
+	int (*qos_hw_to_iprio)(u8 hw);
+	int (*qos_set_untag_pcp)(struct realtek_priv *priv, int port,
+				 u8 hw_prio, u8 untag_pcp);
 };
 
 const struct rtl8365mb_family_info *

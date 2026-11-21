@@ -30,4 +30,10 @@ int rtl8365mb_qos_set_apptrust(struct realtek_priv *priv, int port,
 int rtl8365mb_qos_get_apptrust(struct realtek_priv *priv, int port, bool *trust,
 			       unsigned int n);
 
+/* Hooks of struct rtl8365mb_family_info, one set per chip family */
+int rtl8365mb_c_qos_iprio_to_hw(u8 iprio);
+int rtl8365mb_c_qos_hw_to_iprio(u8 hw);
+int rtl8365mb_c_qos_set_untag_pcp(struct realtek_priv *priv, int port,
+				  u8 hw_prio, u8 untag_pcp);
+
 #endif /* _REALTEK_RTL8365MB_QOS_H */
