@@ -8,6 +8,8 @@
 #ifndef _REALTEK_H
 #define _REALTEK_H
 
+#include <linux/bitmap.h>
+#include <linux/if_vlan.h>
 #include <linux/phy.h>
 #include <linux/platform_device.h>
 #include <linux/gpio/consumer.h>
@@ -65,13 +67,21 @@ struct realtek_priv {
 	 * deleting port VLAN memberships and PVID configurations.
 	 */
 	struct mutex		vlan_lock;
+	/* VIDs with a non-empty 4K VLAN entry written by rtl8365mb on family
+	 * D (left empty by other chips and drivers), protected by vlan_lock.
+	 * Lets a switch-wide update visit only the entries in use instead of
+	 * reading all 4094 over the slow management bus.
+	 */
+	DECLARE_BITMAP(vlan_4k_used, VLAN_N_VID);
 	/* l2_lock is used to prevent concurrent modifications of L2 table
 	 * entries while another function is reading it. l2_(add,del)_mc
 	 * is an example that first read current table entry and then
 	 * create/update it. l2_(add|del)_uc uses a single table op and,
 	 * internally, it might not need this lock. However, altering FDB
 	 * may still collide, as well as l2_flush, with fdb_dump iterating
-	 * over FDB.
+	 * over FDB. On the RTL8367S-VB (family D), l2_del_uc also looks the
+	 * entry up before writing it, as two separate table queries, so it
+	 * does depend on this lock.
 	 */
 	struct mutex		l2_lock;
 	struct mii_bus		*user_mii_bus;
@@ -175,9 +185,10 @@ struct realtek_ops {
 	 * priority. A *_prio getter returns an iprio or a negative errno.
 	 */
 	int	(*qos_get_port_prio)(struct realtek_priv *priv, int port);
-	/* Set the priority of @port to @iprio, and make @untag_pcp the PCP
-	 * given to untagged frames on @port. @untag_pcp is an 802.1p
-	 * priority, not an iprio.
+	/* Set the priority of @port to @iprio. Where supported, also make
+	 * @untag_pcp the PCP given to untagged frames on @port. Hardware without
+	 * a separately configurable untagged PCP must reject PCP trust.
+	 * @untag_pcp is an 802.1p priority, not an iprio.
 	 */
 	int	(*qos_set_port_prio)(struct realtek_priv *priv, int port,
 				     u8 iprio, u8 untag_pcp);
